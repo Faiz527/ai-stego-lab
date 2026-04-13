@@ -177,7 +177,7 @@ def export_summary(batch_result: dict) -> dict:
     }
     
     for method, results in batch_result['results'].items():
-        successful = [r for r in results if r.get('status', '').startswith('✅')]
+        successful = [r for r in results if r.get('status', '').startswith('✅ Success')]
         summary['details'][method] = {
             'successful': len(successful),
             'failed': len(results) - len(successful),

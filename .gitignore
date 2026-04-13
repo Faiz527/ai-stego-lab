@@ -6,7 +6,7 @@
 venv/
 ENV/
 env/
-.venv
+.venv-3/
 env.bak/
 venv.bak/
 .venv-1/

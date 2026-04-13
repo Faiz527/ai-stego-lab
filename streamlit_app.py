@@ -69,18 +69,29 @@ if "current_page" not in st.session_state:
 #                           DATABASE INITIALIZATION
 # ============================================================================
 
-try:
-    db_available = initialize_database()
-    if db_available:
-        logger.info("✅ Database initialized successfully")
-    else:
-        logger.warning("⚠️ Database not available - some features disabled")
-        st.warning("⚠️ Database connection unavailable. Authentication disabled.")
-        st.info("Set up PostgreSQL and add credentials to .env (local) or .streamlit/secrets.toml (cloud)")
-except Exception as e:
-    logger.error(f"Database initialization failed: {e}")
-    st.warning(f"⚠️ Database unavailable: {str(e)[:100]}")
-    logger.info("App will run without authentication")
+@st.cache_resource  # This makes it run ONCE, not every rerun
+def init_db_once():
+    """Initialize database only once per session."""
+    try:
+        db_available = initialize_database()
+        if db_available:
+            logger.info("✅ Database initialized successfully")
+            return True
+        else:
+            logger.warning("⚠️ Database not available - some features disabled")
+            return False
+    except Exception as e:
+        logger.error(f"Database initialization failed: {e}")
+        logger.info("App will run without authentication")
+        return False
+
+# Call the cached function
+db_available = init_db_once()
+
+# Show warnings if DB not available
+if not db_available:
+    st.warning("⚠️ Database connection unavailable. Authentication disabled.")
+    st.info("Set up PostgreSQL and add credentials to .env (local) or .streamlit/secrets.toml (cloud)")
 
 # ============================================================================
 #                           NAVIGATION CONFIG

@@ -97,9 +97,11 @@ class BatchProcessingController:
                     'message': f"ZIP file not found: {zip_path}"
                 }
             
-            # Step 1: Extract ZIP
+            # Step 1: Extract ZIP to batch-specific directory (prevents race conditions)
             logger.info("Step 1: Extracting ZIP...")
-            extract_result = extract_zip(str(zip_path), str(self.input_images_path))
+            batch_extract_dir = self.base_path / 'data' / 'temp' / batch_id / 'images'
+            batch_extract_dir.mkdir(parents=True, exist_ok=True)
+            extract_result = extract_zip(str(zip_path), str(batch_extract_dir))
             
             if not extract_result['success']:
                 return {
@@ -139,16 +141,31 @@ class BatchProcessingController:
             
             if not encode_result['success']:
                 logger.error(f"Encoding failed: {encode_result['message']}")
+                # Early return - don't continue on encoding failure
+                return {
+                    'success': False,
+                    'batch_id': batch_id,
+                    'message': f"Batch encoding failed: {encode_result['message']}",
+                    'extracted_images': len(image_paths),
+                    'valid_images': len(valid_images),
+                    'processing_results': encode_result
+                }
             
             # Log the batch encoding operation
             try:
-                log_operation(
-                    username=username,
-                    operation_type='batch_encode',
-                    method=','.join(methods),
-                    image_count=len(valid_images),
-                    success=encode_result['success']
-                )
+                from ..db.db_utils import get_user_id
+                user_id = get_user_id(username)
+                if user_id:
+                    log_operation(
+                        user_id=user_id,
+                        operation_type='batch_encode',
+                        method=','.join(methods),
+                        input_image=str(zip_path),
+                        output_image=encode_result['output_path'],
+                        message_length=len(secret_message),
+                        encoding_time=0.0,
+                        status='success' if encode_result['success'] else 'failed'
+                    )
             except Exception as e:
                 logger.warning(f"Could not log operation: {str(e)}")
             
@@ -160,9 +177,12 @@ class BatchProcessingController:
             report_json = generate_batch_report(encode_result, f"{batch_id}_report")
             report_csv = generate_csv_report(encode_result, f"{batch_id}_report")
             
-            # Step 5: Cleanup extracted images
+            # Step 5: Cleanup batch-specific extracted images directory
             logger.info("Step 5: Cleaning up...")
-            cleanup_result = cleanup_extracted(str(self.input_images_path))
+            cleanup_result = cleanup_extracted(str(batch_extract_dir.parent.parent))  # Remove entire batch temp dir
+            
+            if not cleanup_result:
+                logger.warning(f"Warning: Failed to cleanup batch temp directory: {batch_extract_dir.parent.parent}")
             
             # Prepare final result
             final_result = {
@@ -257,13 +277,22 @@ class BatchProcessingController:
             )
             
             # Log the batch encoding operation
-            log_operation(
-                username=username,
-                operation_type='batch_encode',
-                method=','.join(methods),
-                image_count=len(valid_images),
-                success=encode_result['success']
-            )
+            try:
+                from ..db.db_utils import get_user_id
+                user_id = get_user_id(username)
+                if user_id:
+                    log_operation(
+                        user_id=user_id,
+                        operation_type='batch_encode',
+                        method=','.join(methods),
+                        input_image='batch_images',  # Batch of individual images, not ZIP
+                        output_image=encode_result['output_path'],
+                        message_length=len(secret_message),
+                        encoding_time=0.0,
+                        status='success' if encode_result['success'] else 'failed'
+                    )
+            except Exception as e:
+                logger.warning(f"Could not log operation: {str(e)}")
             
             # Generate reports
             logger.info("Generating reports...")

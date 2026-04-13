@@ -13,6 +13,37 @@ import tempfile
 
 logger = logging.getLogger(__name__)
 
+
+def _is_valid_image_file(file_path: str) -> bool:
+    """
+    Validate image file by checking magic bytes (file signature).
+    
+    Args:
+        file_path (str): Path to file to validate
+    
+    Returns:
+        bool: True if file signature matches known image format
+    """
+    try:
+        magic_bytes = {
+            b'\x89PNG': 'png',
+            b'\xff\xd8\xff': 'jpeg',
+            b'BM': 'bmp',
+            b'GIF8': 'gif',
+            b'II\x2a\x00': 'tiff',  # Little-endian TIFF
+            b'MM\x00\x2a': 'tiff',  # Big-endian TIFF
+        }
+        with open(file_path, 'rb') as f:
+            header = f.read(8)
+            for magic, fmt in magic_bytes.items():
+                if header.startswith(magic):
+                    return True
+        return False
+    except Exception as e:
+        logger.debug(f"Magic byte check failed: {str(e)}")
+        return False
+
+
 def extract_zip(uploaded_file, extract_path: str) -> dict:
     """
     Extract ZIP file and return list of extracted image files.
@@ -61,8 +92,19 @@ def extract_zip(uploaded_file, extract_path: str) -> dict:
                 if any(file_lower.endswith(ext) for ext in image_extensions):
                     extracted_file = zip_ref.extract(file_info, extract_path)
                     # Normalize path for consistency
-                    extracted_files.append(os.path.normpath(extracted_file))
-                    logger.info(f"Extracted: {file_info.filename}")
+                    extracted_file = os.path.normpath(extracted_file)
+                    
+                    # Validate file content with magic bytes
+                    if _is_valid_image_file(extracted_file):
+                        extracted_files.append(extracted_file)
+                        logger.info(f"Extracted and validated: {file_info.filename}")
+                    else:
+                        # File extension is image but content is not - remove it
+                        logger.warning(f"File has image extension but invalid content: {file_info.filename}")
+                        try:
+                            os.remove(extracted_file)
+                        except Exception as e:
+                            logger.warning(f"Could not remove invalid file: {str(e)}")
         
         if not extracted_files:
             logger.warning(f"No image files found in ZIP. Files in ZIP:")
@@ -135,8 +177,8 @@ def validate_images(image_paths: list) -> dict:
         
         for path in image_paths:
             try:
-                img = Image.open(path)
-                img.verify()
+                with Image.open(path) as img:
+                    img.verify()
                 valid.append(path)
                 logger.info(f"Valid image: {path}")
             except Exception as e:

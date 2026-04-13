@@ -26,12 +26,17 @@ PROJECT_ROOT = Path(__file__).parent.parent.parent
 load_dotenv(dotenv_path=str(PROJECT_ROOT / '.env'))
 
 # Database configuration
+DB_PASSWORD = os.getenv('DB_PASSWORD')
+if not DB_PASSWORD:
+    raise ValueError("❌ DB_PASSWORD environment variable is REQUIRED but not set. "
+                     "Set it in .env or Streamlit secrets.")
+
 DB_CONFIG = {
     'host': os.getenv('DB_HOST', 'localhost'),
     'port': os.getenv('DB_PORT', '5432'),
     'database': os.getenv('DB_NAME', 'stegnography'),
     'user': os.getenv('DB_USER', 'postgres'),
-    'password': os.getenv('DB_PASSWORD', 'Password')
+    'password': DB_PASSWORD
 }
 
 # Rate limiting configuration
@@ -166,7 +171,10 @@ def get_db_connection():
         port = int(os.getenv('DB_PORT', 5432))
         database = os.getenv('DB_NAME', 'stegnography')
         user = os.getenv('DB_USER', 'postgres')
-        password = os.getenv('DB_PASSWORD', 'Password')
+        password = os.getenv('DB_PASSWORD')
+        if not password:
+            raise ValueError("❌ DB_PASSWORD environment variable is REQUIRED but not set. "
+                     "Set it in .env or Streamlit secrets.")
         
         logger.info(f"🔌 Using local database: {host}:{port}/{database}")
         conn = psycopg2.connect(
@@ -193,6 +201,8 @@ def initialize_database():
     
     Handles connection errors gracefully.
     """
+    conn = None
+    cursor = None
     try:
         conn = get_db_connection()
         cursor = conn.cursor()
@@ -207,15 +217,9 @@ def initialize_database():
             );
         """)
         
-        # Drop operations table if exists (to force schema update)
-        try:
-            cursor.execute("DROP TABLE IF EXISTS operations CASCADE;")
-        except:
-            pass
-        
-        # Create operations table with FULL schema (no IF NOT EXISTS)
+        # Create operations table if it doesn't exist (preserve data)
         cursor.execute("""
-            CREATE TABLE operations (
+            CREATE TABLE IF NOT EXISTS operations (
                 id SERIAL PRIMARY KEY,
                 user_id INT NOT NULL REFERENCES users(id),
                 operation_type VARCHAR(50) DEFAULT 'encode',
@@ -241,15 +245,28 @@ def initialize_database():
         """)
         
         conn.commit()
-        cursor.close()
-        conn.close()
-        
         logger.info("✅ Database initialized successfully")
         return True
         
     except Exception as e:
         logger.error(f"Database initialization error: {e}")
+        if conn:
+            try:
+                conn.rollback()
+            except:
+                pass
         return False
+    finally:
+        if cursor:
+            try:
+                cursor.close()
+            except:
+                pass
+        if conn:
+            try:
+                conn.close()
+            except:
+                pass
 
 
 def add_user(username: str, password: str) -> bool:
@@ -266,6 +283,8 @@ def add_user(username: str, password: str) -> bool:
     Raises:
         DatabaseError: If database operation fails
     """
+    conn = None
+    cursor = None
     try:
         # Normalize username to lowercase
         username = username.lower().strip()
@@ -292,20 +311,44 @@ def add_user(username: str, password: str) -> bool:
         )
         
         conn.commit()
-        cursor.close()
-        conn.close()
         logger.info(f"User added successfully")
         return True
         
     except psycopg2.IntegrityError:
         # Username already exists
         logger.warning("Username already exists")
+        if conn:
+            try:
+                conn.rollback()
+            except:
+                pass
         return False
     except DatabaseError:
+        if conn:
+            try:
+                conn.rollback()
+            except:
+                pass
         raise
     except Exception as e:
         logger.error(f"Failed to add user: {str(e)}")
+        if conn:
+            try:
+                conn.rollback()
+            except:
+                pass
         raise DatabaseError("Failed to create user")
+    finally:
+        if cursor:
+            try:
+                cursor.close()
+            except:
+                pass
+        if conn:
+            try:
+                conn.close()
+            except:
+                pass
 
 
 def verify_user(username: str, password: str) -> dict:
@@ -332,6 +375,8 @@ def verify_user(username: str, password: str) -> dict:
         logger.warning(f"Rate limit exceeded for user: {username}")
         raise RateLimitError("Too many login attempts. Please try again later.")
     
+    conn = None
+    cursor = None
     try:
         conn = get_db_connection()
         cursor = conn.cursor()
@@ -343,8 +388,6 @@ def verify_user(username: str, password: str) -> dict:
         )
         
         result = cursor.fetchone()
-        cursor.close()
-        conn.close()
         
         if result:
             user_id, db_username, password_hash = result
@@ -369,6 +412,17 @@ def verify_user(username: str, password: str) -> dict:
         # Don't expose internal errors - return generic failure
         _record_login_attempt(username)
         return None
+    finally:
+        if cursor:
+            try:
+                cursor.close()
+            except:
+                pass
+        if conn:
+            try:
+                conn.close()
+            except:
+                pass
 
 
 def log_operation(user_id: int, operation_type: str, method: str, input_image: str, 
@@ -390,6 +444,8 @@ def log_operation(user_id: int, operation_type: str, method: str, input_image: s
     Raises:
         DatabaseError: If logging fails
     """
+    conn = None
+    cursor = None
     try:
         conn = get_db_connection()
         cursor = conn.cursor()
@@ -401,15 +457,34 @@ def log_operation(user_id: int, operation_type: str, method: str, input_image: s
         """, (user_id, operation_type, method, input_image, output_image, message_length, encoding_time, status))
         
         conn.commit()
-        cursor.close()
-        conn.close()
         logger.info(f"Operation logged for user {user_id}: {operation_type} via {method}")
         
     except DatabaseError:
+        if conn:
+            try:
+                conn.rollback()
+            except:
+                pass
         raise
     except psycopg2.Error as e:
         logger.error(f"Failed to log operation: {str(e)}")
+        if conn:
+            try:
+                conn.rollback()
+            except:
+                pass
         raise DatabaseError("Failed to log operation")
+    finally:
+        if cursor:
+            try:
+                cursor.close()
+            except:
+                pass
+        if conn:
+            try:
+                conn.close()
+            except:
+                pass
 
 
 def log_activity(user_id: int, action: str, details: str = None):
@@ -424,6 +499,8 @@ def log_activity(user_id: int, action: str, details: str = None):
     Raises:
         DatabaseError: If logging fails
     """
+    conn = None
+    cursor = None
     try:
         conn = get_db_connection()
         cursor = conn.cursor()
@@ -434,15 +511,34 @@ def log_activity(user_id: int, action: str, details: str = None):
         )
         
         conn.commit()
-        cursor.close()
-        conn.close()
         logger.info(f"Activity logged for user {user_id}")
         
     except DatabaseError:
+        if conn:
+            try:
+                conn.rollback()
+            except:
+                pass
         raise
     except psycopg2.Error as e:
         logger.error(f"Failed to log activity: {str(e)}")
+        if conn:
+            try:
+                conn.rollback()
+            except:
+                pass
         raise DatabaseError("Failed to log activity")
+    finally:
+        if cursor:
+            try:
+                cursor.close()
+            except:
+                pass
+        if conn:
+            try:
+                conn.close()
+            except:
+                pass
 
 
 def get_user_operations(user_id: int, limit: int = 10) -> list:
@@ -461,7 +557,7 @@ def get_user_operations(user_id: int, limit: int = 10) -> list:
         cursor = conn.cursor()
         
         cursor.execute("""
-            SELECT id, method, input_image, output_image, message_size, encoding_time, status, created_at
+            SELECT id, method, input_image, output_image, message_length, encoding_time, status, created_at
             FROM operations
             WHERE user_id = %s
             ORDER BY created_at DESC
@@ -723,9 +819,9 @@ def get_size_distribution() -> dict:
         cursor.execute("""
             SELECT 
                 CASE 
-                    WHEN message_size < 1000 THEN 'Small (< 1KB)'
-                    WHEN message_size < 10000 THEN 'Medium (1-10KB)'
-                    WHEN message_size < 100000 THEN 'Large (10-100KB)'
+                    WHEN message_length < 1000 THEN 'Small (< 1KB)'
+                    WHEN message_length < 10000 THEN 'Medium (1-10KB)'
+                    WHEN message_length < 100000 THEN 'Large (10-100KB)'
                     ELSE 'Very Large (> 100KB)'
                 END as size_category,
                 COUNT(*) as count

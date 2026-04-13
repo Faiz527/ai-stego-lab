@@ -102,12 +102,14 @@ def packetize_message(message: str, num_packets: int) -> List[str]:
         end_idx = min(start_idx + packet_size, len(message))
         payload = message[start_idx:end_idx]
         
+        # Calculate checksum BEFORE padding (on unpadded data)
+        checksum = calculate_checksum(payload)
+        
         # Pad last packet if needed
         if len(payload) < packet_size and i < num_packets - 1:
             payload = payload.ljust(packet_size, '\x00')
         
         # Create header
-        checksum = calculate_checksum(payload)
         header = create_packet_header(
             packet_id=i,
             total_packets=num_packets,
@@ -193,13 +195,15 @@ def reconstruct_message(packets: List[Tuple[dict, str]]) -> Tuple[bool, str, str
     # Sort by packet_id and reconstruct
     sorted_packets = sorted(packets, key=lambda x: x[0]["packet_id"])
     
-    # Verify checksums and reconstruct
+    # Verify checksums and reconstruct (compare on unpadded payload)
     message_parts = []
     for header, payload in sorted_packets:
         expected_checksum = header.get("checksum", "")
-        if expected_checksum and calculate_checksum(payload) != expected_checksum:
+        # Trim to actual length before checksum verification (matches packetization)
+        unpadded_payload = payload.rstrip('\x00')
+        if expected_checksum and calculate_checksum(unpadded_payload) != expected_checksum:
             logger.warning(f"Checksum mismatch for packet {header['packet_id']}")
-        message_parts.append(payload)
+        message_parts.append(unpadded_payload)
     
     reconstructed = "".join(message_parts)
     

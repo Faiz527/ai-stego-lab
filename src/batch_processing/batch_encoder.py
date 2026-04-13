@@ -170,33 +170,33 @@ def batch_encode_images(
     # Process each image
     for idx, (img_path, msg_to_embed) in enumerate(zip(sorted_image_paths, messages_per_image)):
         try:
-            img = Image.open(img_path)
-            img_path_obj = Path(img_path)
-            filename = img_path_obj.stem
-            original_extension = img_path_obj.suffix.lower()
-            
-            logger.info(f"Processing {idx+1}/{len(sorted_image_paths)}: {filename}")
-            
-            # Encode with each method
-            for method in methods:
-                start_time = time.time()
+            with Image.open(img_path) as img:
+                img_path_obj = Path(img_path)
+                filename = img_path_obj.stem
+                original_extension = img_path_obj.suffix.lower()
                 
-                try:
-                    logger.debug(f"  {method}: Starting encoding...")
+                logger.info(f"Processing {idx+1}/{len(sorted_image_paths)}: {filename}")
+                
+                # Encode with each method
+                for method in methods:
+                    start_time = time.time()
                     
-                    if method == 'LSB':
-                        encoded_img = encode_image(img, msg_to_embed)
-                    elif method == 'DCT':
-                        encoded_img = encode_dct(img, msg_to_embed)
-                    elif method == 'DWT':
-                        encoded_img = encode_dwt(img, msg_to_embed)
-                    else:
-                        logger.warning(f"  {method}: Unknown method")
-                        continue
-                    
-                    # Save encoded image with appropriate format
-                    output_dir = output_base / method
-                    output_dir.mkdir(parents=True, exist_ok=True)
+                    try:
+                        logger.debug(f"  {method}: Starting encoding...")
+                        
+                        if method == 'LSB':
+                            encoded_img = encode_image(img, msg_to_embed)
+                        elif method == 'DCT':
+                            encoded_img = encode_dct(img, msg_to_embed)
+                        elif method == 'DWT':
+                            encoded_img = encode_dwt(img, msg_to_embed)
+                        else:
+                            logger.warning(f"  {method}: Unknown method")
+                            continue
+                        
+                        # Save encoded image with appropriate format
+                        output_dir = output_base / method
+                        output_dir.mkdir(parents=True, exist_ok=True)
                     
                     # For frequency domain methods (DCT, DWT), use PNG to preserve coefficients
                     if method in ['DCT', 'DWT']:
@@ -225,7 +225,7 @@ def batch_encode_images(
                         'output_path': str(output_path),
                         'size': img.size,
                         'encoding_time': round(elapsed_time, 3),
-                        'status': 'Success',
+                        'status': '✅ Success',
                         'batch_mode': batch_mode
                     }
                     
@@ -431,27 +431,27 @@ def get_encoding_capacity(image_path: str) -> dict:
         dict: Capacity information for each method
     """
     try:
-        img = Image.open(image_path)
-        width, height = img.size
-        pixels = width * height
-        
-        return {
-            'LSB': {
-                'bits': pixels * 3,
-                'bytes': (pixels * 3) // 8,
-                'kb': ((pixels * 3) // 8) / 1024
-            },
-            'DCT': {
-                'bits': pixels,
-                'bytes': pixels // 8,
-                'kb': (pixels // 8) / 1024
-            },
-            'DWT': {
-                'bits': pixels // 4 * 3,
-                'bytes': (pixels // 4 * 3) // 8,
-                'kb': ((pixels // 4 * 3) // 8) / 1024
+        with Image.open(image_path) as img:
+            width, height = img.size
+            pixels = width * height
+            
+            return {
+                'LSB': {
+                    'bits': pixels * 3,
+                    'bytes': (pixels * 3) // 8,
+                    'kb': ((pixels * 3) // 8) / 1024
+                },
+                'DCT': {
+                    'bits': pixels,
+                    'bytes': pixels // 8,
+                    'kb': (pixels // 8) / 1024
+                },
+                'DWT': {
+                    'bits': pixels // 4 * 3,
+                    'bytes': (pixels // 4 * 3) // 8,
+                    'kb': ((pixels // 4 * 3) // 8) / 1024
+                }
             }
-        }
     except Exception as e:
         logger.error(f"Capacity calculation failed: {str(e)}")
         return {}
